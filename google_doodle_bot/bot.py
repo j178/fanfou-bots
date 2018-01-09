@@ -70,8 +70,10 @@ def get_doodle():
 
 def gen_status(doodle):
     link = 'https://www.google.com/doodles/' + doodle['name']
-    text = '【{0[0]}年{0[1]}月{0[2]}日】 {1} ➔{2} #GoogleDoodle#'.format(
+    today = arrow.get(*doodle['run_date_array']).date() == NOW.date()
+    text = '【{0[0]}-{0[1]}-{0[2]}{1}】 {2} ➔{3} #GoogleDoodle#'.format(
             doodle['run_date_array'],
+            '*' if today else '',
             doodle['title'],
             link)
     photo_url = urlunparse(urlparse(doodle['hires_url'], scheme='http'))
@@ -85,7 +87,7 @@ class MyConfig(Config):
 
 def main():
     logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(name)s %(filename)s:%(lineno)d %(levelname)s %(message)s',
+                        format='%(asctime)s - %(filename)s:%(lineno)d %(levelname)s %(message)s',
                         datefmt='%Y-%m-%d %H:%M:%S')
 
     fan = Fan.get(cfg=MyConfig())
@@ -98,10 +100,12 @@ def main():
 
     success, _ = fan.update_status(status, photo=photo)
     while not success:
+        logging.warning("发布失败: %s", status)
         doodle = get_random()
         status, photo = gen_status(doodle)
         success, _ = fan.update_status(status, photo=photo)
         time.sleep(1)
+    logging.info("发布成功: %s", status)
 
 
 if __name__ == '__main__':
