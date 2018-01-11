@@ -28,6 +28,25 @@ def pager(fan, endpoint, **params):
             return
 
 
+class cached_property(object):
+    """ A property that is only computed once per instance and then replaces
+        itself with an ordinary attribute. Deleting the attribute resets the
+        property.
+
+        Source: https://github.com/bottlepy/bottle/commit/fa7733e075da0d790d809aa3d2f53071897e6f76
+        """
+
+    def __init__(self, func):
+        self.__doc__ = getattr(func, '__doc__')
+        self.func = func
+
+    def __get__(self, obj, cls):
+        if obj is None:
+            return self
+        value = obj.__dict__[self.func.__name__] = self.func(obj)
+        return value
+
+
 class FanfouError(Exception):
     """所有异常的基类"""
 
@@ -362,7 +381,7 @@ class Base:
             if item not in self.dict:
                 id = self.dict.get('id')
                 result = self.fan.get(self.endpiont, id=id)
-                self.dict.update(result.copy())
+                self.dict.update(result)
             return self.dict.get(item)
         raise AttributeError
 
@@ -743,10 +762,18 @@ class Status(Base):
 
         self.user = User.from_json(fan, self.dict['user'])  # type:User
         self.created_at = arrow.get(self.dict['created_at'], 'ddd MMM DD HH:mm:ss Z YYYY')
+
+    @cached_property
+    def repost_status(self):
         if 'repost_status' in self.dict:
-            self.repost_status = Status.from_json(fan, self.dict['repost_status'])
+            return Status.from_json(self.fan, self.dict['repost_status'])
+        return None
+
+    @cached_property
+    def photo(self):
         if 'photo' in self.dict:
-            self.photo = Photo(self.dict['photo']['imageurl'])
+            return Photo(self.dict['photo']['imageurl'])
+        return None
 
     @staticmethod
     def process_text(text, pure=False):
@@ -761,7 +788,24 @@ class Status(Base):
             text = at_re.sub(r'@\1', text)
             text = topic_re.sub(r'#\1#', text)
         text = link_re.sub(r'\1', text)
-        return text
+        return text.strip()
+
+    @cached_property
+    def repost_comment(self):
+        """
+        User A: @me xxxx -> plain mention
+        User B: xxxx 转@a @me xxx -> mention by repost
+        :return:
+        """
+        # 不是一个转发消息
+        if 'repost_status' not in self.dict:
+            return None
+        comment_re = re.compile(r'(?P<target>.*?)[转「]@<a')
+        match = comment_re.match(self.text)
+        if match:
+            comment = match.group('target')
+            return self.process_text(comment, True)
+        return None
 
     @staticmethod
     def process_photo_link(photo):
@@ -778,7 +822,7 @@ class Status(Base):
         result = Status.from_json(self.fan, result)
         return result
 
-    @property
+    @cached_property
     def context(self):
         """按照时间先后顺序显示消息上下文"""
         result = self.fan.get('statuses/context_timeline', id=self.id)
