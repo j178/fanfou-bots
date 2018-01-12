@@ -22,7 +22,7 @@ from van import (
     Fan, Status, FanfouError, Timeline)
 
 log = logging.getLogger(__name__)
-sess = requests.session()
+sess = requests.Session()
 sess.mount('http://', HTTPAdapter(max_retries=5))
 
 fan = Fan(config.FAN_APP_KEY,
@@ -75,10 +75,6 @@ def today_statistics():
     return stat[today]
 
 
-def inc_mentions(user_id):
-    today_statistics().update({user_id: 1})
-
-
 def conclude_yesterday():
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     stat = Counter(state['stat'][yesterday])
@@ -87,7 +83,7 @@ def conclude_yesterday():
     mention_cnt = sum(stat.values())
 
     conclusion = '''\
-各位饭友晚上好，新的一天到咯~
+各位饭友早上好，新的一天到咯~
 在昨天里，本机器人收到了来自 {user} 位饭友、总计 {mention} 次的互动消息，其中饭友 @{frequent[0]} 与我互动了 {frequent[1]} 次，名列前茅！
 谢谢大家的热情，新的一天一起加油哦~
 '''.format(user=user_cnt, mention=mention_cnt, frequent=most_frequent_user)
@@ -155,11 +151,12 @@ def get_message(since_id=None):
         else:
             idle = 1
 
+        stat = today_statistics()
         for st in statuses:  # type:Status
             if st.user.id == fan.me.id:
                 log.info('Ignore one mention by self')
                 continue
-            inc_mentions(st.user.id)
+            stat.update([st.user.screen_name])
             yield st
 
         state['mention_since_id'] = mentions._max_id
