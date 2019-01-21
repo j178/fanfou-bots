@@ -19,10 +19,11 @@ else:
     config.__dict__.update(config_private.__dict__)
 
 from van import (
-    Fan, Status, FanfouError, Timeline)
+    Fan, Status, FanfouError, Timeline
+)
 
 log = logging.getLogger(__name__)
-sess = requests.session()
+sess = requests.Session()
 sess.mount('http://', HTTPAdapter(max_retries=5))
 
 fan = Fan(config.FAN_APP_KEY,
@@ -49,50 +50,59 @@ def new_token():
 
 def restore_state():
     global state
-    with open('state.json') as f:
+    with open('state.json', encoding='utf-8') as f:
         log.info('Restoring state from state.json')
         state = json.load(f)
 
 
 def save_state():
-    with open('state.json', 'w') as f:
+    with open('state.json', 'wt', encoding='utf-8') as f:
         log.info('Dumping state to state.json')
-        json.dump(state, f, indent=2)
+        json.dump(state, f, indent=2, ensure_ascii=False, sort_keys=True)
 
 
 def today_statistics():
     """记录统计信息"""
     global new_day
+
     today = date.today().isoformat()
     stat = state['stat']
-    today_stat = stat.get(today)
-    if not today_stat:
+    try:
+        today_stat = stat[today]
+    except KeyError:
         # 标记新的一天开始
         new_day = True
-        stat[today] = Counter()
-    elif isinstance(today_stat, dict):
-        stat[today] = Counter(stat[today])
+        today_stat = {}
+
+    stat[today] = Counter(today_stat)
     return stat[today]
-
-
-def inc_mentions(user_id):
-    today_statistics().update({user_id: 1})
 
 
 def conclude_yesterday():
     yesterday = (date.today() - timedelta(days=1)).isoformat()
-    stat = Counter(state['stat'][yesterday])
+    try:
+        stat = Counter(state['stat'][yesterday])
+    except KeyError as e:
+        return None
+
     user_cnt = len(stat.keys())
-    most_frequent_user = stat.most_common(1)[0]
     mention_cnt = sum(stat.values())
 
-    conclusion = '''\
-各位饭友晚上好，新的一天到咯~
-在昨天里，本机器人收到了来自 {user} 位饭友、总计 {mention} 次的互动消息，其中饭友 @{frequent[0]} 与我互动了 {frequent[1]} 次，名列前茅！
-谢谢大家的热情，新的一天一起加油哦~
-'''.format(user=user_cnt, mention=mention_cnt, frequent=most_frequent_user)
+    conclusion = []
+    conclusion.append('各位饭友好，新的一天到咯~')
+    if mention_cnt > 0:
+        conclusion.append(('在昨天里，本机器人收到了来自 {user} '
+                           '位饭友、总计 {mention} 次的互动消息。')
+                          .format(user=user_cnt, mention=mention_cnt))
+        most_frequent = stat.most_common(1)[0]
+        conclusion.append('其中饭友 @{user[0]} 与我互动了 {user[1]} 次，名列前茅！'
+                          .format(user=most_frequent))
+    else:
+        conclusion.append('昨天没有小伙伴与我互动，本机器人读书看报，度过了愉快的一天。')
 
-    return conclusion
+    conclusion.append('谢谢大家的热情，新的一天一起加油哦~')
+
+    return '\n'.join(conclusion)
 
 
 def api(q, user):
@@ -122,10 +132,13 @@ def api(q, user):
 
 
 def reply(status: Status):
-    text = status.repost_comment
-    if text is None:
-        text = status.process_text(status.text, pure=True)
+    if status.repost_comment is not None:
+        text = status.repost_comment
+    else:
+        text = status.text
+    text = status.process_text(text, pure=True)
     response = api(text, status.user)
+
     log.info('Question: %s', text)
     log.info('Anwser: %s', response)
     if response is not None:
@@ -137,29 +150,43 @@ def reply(status: Status):
 
 
 def get_message(since_id=None):
+    global new_day
+
     mentions = Timeline(fan, None, 'statuses/mentions', max_id=since_id)
     idle = 1
     while True:
         try:
             statuses = mentions.fetch_newer()
         except FanfouError as e:
+            # Fanfou 有可能宕机了
             log.exception('Fetch new mentions error')
             time.sleep(3)
-            continue
 
         log.info('Got %s new mentions', len(statuses))
         if not statuses:
-            idle = min(idle * 1.5, 30)
+            idle = min(idle * 1.5, 60)
         elif len(statuses) <= 3:
             idle = 3
         else:
             idle = 1
 
+        stat = today_statistics()
+        if new_day:
+            conclusion = conclude_yesterday()
+            if conclusion:
+                log.info('Yesterday conclusion: %s', conclusion)
+                try:
+                    fan.update_status(conclusion + random.choice(emojis))
+                except FanfouError as e:
+                    log.exception('Update conclusion failed')
+                else:
+                    new_day = False
+
         for st in statuses:  # type:Status
             if st.user.id == fan.me.id:
                 log.info('Ignore one mention by self')
                 continue
-            inc_mentions(st.user.id)
+            stat.update([st.user.screen_name])
             yield st
 
         state['mention_since_id'] = mentions._max_id
@@ -172,12 +199,12 @@ if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
     atexit.register(save_state)
 
-    restore_state()
-    since_id = state['mention_since_id']
-    for message in get_message(since_id):
-        reply(message)
-        if new_day:
-            conclustion = conclude_yesterday()
-            log.info('Yesterday conclustion: %s', conclustion)
-            fan.update_status(conclustion)
-            new_day = False
+    while True:
+        try:
+            restore_state()
+            since_id = state['mention_since_id']
+            for message in get_message(since_id):
+                reply(message)
+        except Exception as e:
+            log.exception('Something bad happened')
+            break
