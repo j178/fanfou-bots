@@ -250,7 +250,7 @@ def filter_by_image(status, data):
     if 'person' not in tags:
         return False
     if not target_tags.intersection(tags.keys()):
-        return None
+        return False
 
     if not faces or len(faces) > 1:
         return False
@@ -262,7 +262,7 @@ def filter_by_image(status, data):
     r = face['faceRectangle']
     face_area = r['width'] * r['height']
     image_area = metadata['width'] * metadata['height']
-    if (face_area / image_area) < 0.1:
+    if (face_area / image_area) < 0.8:
         return False
 
     return True
