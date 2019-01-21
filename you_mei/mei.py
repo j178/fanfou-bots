@@ -317,7 +317,7 @@ def consume(queue):
             continue
 
         data = computer_vision(status, face_url=image_url)
-        if not filter_by_image(status, data):
+        if not data or not filter_by_image(status, data):
             continue
 
         score = face_score(status, image_url)
