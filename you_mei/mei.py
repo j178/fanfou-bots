@@ -262,7 +262,7 @@ def filter_by_image(status, data):
     r = face['faceRectangle']
     face_area = r['width'] * r['height']
     image_area = metadata['width'] * metadata['height']
-    if (face_area / image_area) < 0.8:
+    if (face_area / image_area) < 0.08:
         return False
 
     return True
