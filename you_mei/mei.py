@@ -212,11 +212,15 @@ def download_photo(img_url):
 
 
 def filter_by_status(status: Status):
+    bots = {'weather_image'}
     # 原创
     if 'repost_status' in status.dict:
         return False
     # 有图
     if 'photo' not in status.dict:
+        return False
+    # 过滤经常发图的机器人
+    if status.user.id in bots:
         return False
 
     # 年轻妹子
