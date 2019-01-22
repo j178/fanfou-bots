@@ -85,6 +85,7 @@ def face_detection(status: Status, *, face_url=None, content=None):
 
     try:
         resp = session.post(api_url, params=params, headers=headers, **data)
+        resp.raise_for_status()
     except Exception:
         return None
     else:
@@ -99,7 +100,7 @@ def face_detection(status: Status, *, face_url=None, content=None):
                 else:
                     d = {}
                 d['face_api'] = data
-                f.write_text(json.dumps(d))
+                f.write_text(json.dumps(d, sort_keys=True, indent=2))
             results = []
             for one in data:
                 attr = one['faceAttributes']
@@ -143,7 +144,7 @@ def computer_vision(status: Status, *, face_url=None, content=None):
                 else:
                     d = {}
                 d['vision_api'] = data
-                f.write_text(json.dumps(d))
+                f.write_text(json.dumps(d, sort_keys=True, indent=2))
 
             return data
 
@@ -177,7 +178,7 @@ def face_score(status: Status, image_url):
             else:
                 d = {}
             d['xiaobing'] = data
-            f.write_text(json.dumps(d))
+            f.write_text(json.dumps(d, sort_keys=True, indent=2))
 
         faces = data['content']['metadata']['face_number']
         if faces == 1:
