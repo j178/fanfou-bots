@@ -42,15 +42,14 @@ log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s [%(levelname)s] %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S')
-sess = requests.Session()
-sess.mount('http://', HTTPAdapter(max_retries=3))
-sess.mount('https://', HTTPAdapter(max_retries=3))
+session = requests.Session()
+session.mount('http://', HTTPAdapter(max_retries=3))
+session.mount('https://', HTTPAdapter(max_retries=3))
 
 fan = Fan(config.FAN_APP_KEY,
           config.FAN_APP_SECRET,
           config.FAN_ACCESS_TOKEN)
 FaceAttributes = namedtuple('FaceAttributes', 'age gender')
-session = requests.Session()
 
 DEBUG = False
 DEBUG_PHOTO_FOLDER = Path('./debug/photos').absolute()
@@ -271,7 +270,7 @@ def filter_by_image(status, data):
 
 def produce(queue):
     timeline = fan.public_timeline
-    idle = 5
+    idle = origin = 5
     while True:
         try:
             statuses = timeline.fetch_newer()
@@ -287,7 +286,7 @@ def produce(queue):
         elif len(statuses) <= 3:
             idle = 10
         else:
-            idle = 5
+            idle = origin
 
         for status in statuses:
             queue.put(status)
@@ -322,7 +321,6 @@ def consume(queue):
             continue
 
         score = face_score(status, image_url)
-        # 颜值大于6分
         if score is not None and score < MIN_SCORE:
             continue
 
@@ -331,6 +329,8 @@ def consume(queue):
             log.info('Forward one')
         except Exception:
             log.error('Report failed')
+
+        time.sleep(1)
 
 
 def main():
