@@ -104,7 +104,7 @@ def face_detection(status: Status, *, face_url=None, content=None):
                 else:
                     d = {}
                 d['face_api'] = data
-                f.write_text(json.dumps(d, sort_keys=True, indent=2))
+                f.write_text(json.dumps(d, sort_keys=True, indent=2, ensure_ascii=False))
             results = []
             for one in data:
                 attr = one['faceAttributes']
@@ -148,7 +148,7 @@ def computer_vision(status: Status, *, face_url=None, content=None):
                 else:
                     d = {}
                 d['vision_api'] = data
-                f.write_text(json.dumps(d, sort_keys=True, indent=2))
+                f.write_text(json.dumps(d, sort_keys=True, indent=2, ensure_ascii=False))
 
             return data
 
@@ -182,7 +182,7 @@ def face_score(status: Status, image_url):
             else:
                 d = {}
             d['xiaobing'] = data
-            f.write_text(json.dumps(d, sort_keys=True, indent=2))
+            f.write_text(json.dumps(d, sort_keys=True, indent=2, ensure_ascii=False))
 
         faces = data['content']['metadata']['face_number']
         if faces == 1:
@@ -261,9 +261,11 @@ def filter_by_image(status, data):
     if not target_tags.intersection(tags.keys()):
         return False
 
+    # 如果有多张脸
     if not faces or len(faces) > 1:
         return False
     face = faces[0]
+    # 年龄和性别
     if face['age'] > MAX_AGE or face['gender'].lower() != 'female':
         return False
 
