@@ -305,6 +305,7 @@ def consume(queue):
             break
 
         if not filter_by_status(status):
+            log.info('Filtered one by status info')
             continue
 
         fanfou_url = status.photo.origin_url
@@ -319,10 +320,12 @@ def consume(queue):
 
         data = computer_vision(status, face_url=image_url)
         if not data or not filter_by_image(status, data):
+            log.info('Filtered one by image info')
             continue
 
         score = face_score(status, image_url)
         if score is not None and score < MIN_SCORE:
+            log.info('Filtered one by face score')
             continue
 
         try:
