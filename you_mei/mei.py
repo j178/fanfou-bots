@@ -57,6 +57,7 @@ DEBUG_STAT_FOLDER = Path('./debug/stat').absolute()
 
 MAX_AGE = 30
 MIN_SCORE = 7
+SPAM_BOTS = set()
 
 
 def now():
@@ -65,6 +66,16 @@ def now():
 
 def stat_json_file(status):
     return DEBUG_STAT_FOLDER / (now() + '_' + status.id + '.json')
+
+
+def load_spam_bots():
+    f = Path('./bots.json')
+    try:
+        bots = set(json.loads(f.read_text()))
+    except Exception:
+        bots = set()
+
+    SPAM_BOTS.update(bots)
 
 
 def face_detection(status: Status, *, face_url=None, content=None):
@@ -216,7 +227,6 @@ def download_photo(img_url):
 
 
 def filter_by_status(status: Status):
-    bots = {'weather_image', '~KgjnhzJdzco'}
     # 原创
     if 'repost_status' in status.dict:
         return False
@@ -224,7 +234,7 @@ def filter_by_status(status: Status):
     if 'photo' not in status.dict:
         return False
     # 过滤经常发图的机器人
-    if status.user.id in bots:
+    if status.user.id in SPAM_BOTS:
         return False
 
     # 年轻妹子
@@ -352,6 +362,7 @@ def main():
         DEBUG_PHOTO_FOLDER.mkdir(parents=True, exist_ok=True)
         DEBUG_STAT_FOLDER.mkdir(parents=True, exist_ok=True)
 
+    load_spam_bots()
     q = Queue(maxsize=100)
     producer = threading.Thread(target=produce, args=(q,), daemon=True)
     consumer = threading.Thread(target=consume, args=(q,), daemon=True)
