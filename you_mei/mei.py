@@ -129,11 +129,12 @@ def computer_vision(status: Status, *, face_url=None, content=None):
 
     try:
         resp = session.post(api_url, params=params, headers=headers, **data)
+        resp.raise_for_status()
     except Exception:
         return None
     else:
         data = resp.json()
-        if 'error' in data:
+        if 'code' in data and 'message' in data:
             return None
         else:
             if DEBUG:
