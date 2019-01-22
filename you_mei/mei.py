@@ -60,7 +60,11 @@ MIN_SCORE = 7
 
 
 def now():
-    return datetime.now().strftime('%Y-%m-%d_%H_%M_%S')
+    return datetime.now().strftime('%Y_%m_%d_%H_%M')
+
+
+def stat_json_file(status):
+    return DEBUG_STAT_FOLDER / (now() + '_' + status.id + '.json')
 
 
 def face_detection(status: Status, *, face_url=None, content=None):
@@ -94,7 +98,7 @@ def face_detection(status: Status, *, face_url=None, content=None):
             return None
         else:
             if DEBUG:
-                f = DEBUG_STAT_FOLDER / (now() + '' + status.id + '.json')
+                f = stat_json_file(status)
                 if f.is_file():
                     d = json.loads(f.read_text())
                 else:
@@ -138,7 +142,7 @@ def computer_vision(status: Status, *, face_url=None, content=None):
             return None
         else:
             if DEBUG:
-                f = DEBUG_STAT_FOLDER / (now() + '' + status.id + '.json')
+                f = stat_json_file(status)
                 if f.is_file():
                     d = json.loads(f.read_text())
                 else:
@@ -172,7 +176,7 @@ def face_score(status: Status, image_url):
         return None
     try:
         if DEBUG:
-            f = DEBUG_STAT_FOLDER / (now() + '' + status.id + '.json')
+            f = stat_json_file(status)
             if f.is_file():
                 d = json.loads(f.read_text())
             else:
@@ -212,7 +216,7 @@ def download_photo(img_url):
 
 
 def filter_by_status(status: Status):
-    bots = {'weather_image'}
+    bots = {'weather_image', '~KgjnhzJdzco'}
     # 原创
     if 'repost_status' in status.dict:
         return False
