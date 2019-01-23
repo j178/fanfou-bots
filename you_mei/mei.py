@@ -249,7 +249,7 @@ def filter_by_status(status: Status):
             year = datetime.now().year
             try:
                 birth_year = int(birthday[:4])
-                if 1000 < birth_year < year - MAX_AGE:
+                if 1900 < birth_year < year - MAX_AGE:
                     return False, f'profile age {birth_year}'
             except Exception:
                 pass
@@ -299,18 +299,18 @@ def filter_by_image(status, data):
 
 def process_status(status: Status):
     if status is None:
-        return None
+        return
 
     passed, reason = filter_by_status(status)
     if not passed:
         log.info(f'Filtered {status.id!r} by status info out of {reason!r}')
-        return None
+        return
 
     fanfou_url = status.photo.origin_url
     image_content = download_photo(fanfou_url)
     if not image_content:
         log.error(f'Download photo failed: {fanfou_url!r}')
-        return None
+        return
 
     if DEBUG:
         f = DEBUG_PHOTO_FOLDER / (now() + '_' + status.id + '.' + fanfou_url.rsplit('.')[-1])
@@ -319,22 +319,22 @@ def process_status(status: Status):
     image_url = upload_photo_to_microsoft(image_content)
     if not image_url:
         log.error(f'Upload photo to micorsoft failed: {fanfou_url!r}')
-        return None
+        return
 
     data = computer_vision(status, face_url=image_url)
     if not data:
         log.error('Computer vision api failed')
-        return None
+        return
 
     passed, reason = filter_by_image(status, data)
     if not passed:
         log.info(f'Filtered {status.id!r} by image info out of {reason!r}')
-        return None
+        return
 
     score = face_score(status, image_url)
     if score is not None and score < MIN_SCORE:
         log.info(f'Filtered {status.id!r} by face score: {score}')
-        return None
+        return
 
     try:
         status.repost('', repost_style_left='转', repost_style_right='')
