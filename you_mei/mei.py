@@ -17,6 +17,7 @@ import logging
 import threading
 import time
 from collections import namedtuple
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from queue import Queue
@@ -40,7 +41,7 @@ from van import (
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s [%(levelname)s] %(message)s',
+                    format='%(asctime)s [%(levelname)s] %(threadName)s %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S')
 session = requests.Session()
 session.mount('http://', HTTPAdapter(max_retries=3))
@@ -57,7 +58,6 @@ DEBUG_STAT_FOLDER = Path('./debug/stat').absolute()
 
 MAX_AGE = 30
 MIN_SCORE = 7
-SPAM_BOTS = set()
 
 
 def now():
@@ -75,7 +75,10 @@ def load_spam_bots():
     except Exception:
         bots = set()
 
-    SPAM_BOTS.update(bots)
+    return bots
+
+
+SPAM_BOTS = load_spam_bots()
 
 
 def face_detection(status: Status, *, face_url=None, content=None):
@@ -229,27 +232,27 @@ def download_photo(img_url):
 def filter_by_status(status: Status):
     # 原创
     if 'repost_status' in status.dict:
-        return False
+        return False, 'repost'
     # 有图
     if 'photo' not in status.dict:
-        return False
+        return False, 'no photo'
     # 过滤经常发图的机器人
     if status.user.id in SPAM_BOTS:
-        return False
+        return False, 'spam bot'
 
     # 年轻妹子
     if status.user.gender == '男':
-        return False
+        return False, 'male poster'
     elif status.user.gender == '女':
         birthday = status.user.birthday
         if birthday:
             year = datetime.now().year
             try:
                 if int(birthday[:4]) < year - MAX_AGE:
-                    return False
+                    return False, 'old profile age'
             except Exception:
                 pass
-    return True
+    return True, None
 
 
 def filter_by_image(status, data):
@@ -265,116 +268,115 @@ def filter_by_image(status, data):
     categories = {c['name']: c['score'] for c in categories}
     tags = {t['name']: t['confidence'] for t in tags}
     if not target_categories.intersection(categories.keys()):
-        return False
+        return False, 'category mismatch'
+
     if 'person' not in tags:
-        return False
+        return False, 'no person tag'
+
     if not target_tags.intersection(tags.keys()):
-        return False
+        return False, 'tag mismatch'
 
     # 如果有多张脸
     if not faces or len(faces) > 1:
-        return False
+        return False, 'multiple faces'
     face = faces[0]
     # 年龄和性别
-    if face['age'] > MAX_AGE or face['gender'].lower() != 'female':
-        return False
+    if face['age'] > MAX_AGE:
+        return False, 'old age'
+    if face['gender'].lower() != 'female':
+        return False, 'not female'
 
     # 如果脸的面积太小
     r = face['faceRectangle']
     face_area = r['width'] * r['height']
     image_area = metadata['width'] * metadata['height']
     if (face_area / image_area) < 0.08:
-        return False
+        return False, 'small face area'
 
-    return True
-
-
-def produce(queue):
-    timeline = fan.public_timeline
-    idle = origin = 5
-    while True:
-        try:
-            statuses = timeline.fetch_newer()
-        except FanfouError as e:
-            # Fanfou 有可能宕机了
-            log.exception('Fetch new statuses error')
-            time.sleep(3)
-            continue
-
-        log.info('Got %s new statuses', len(statuses))
-        if not statuses:
-            idle = min(idle * 1.5, 60)
-        elif len(statuses) <= 3:
-            idle = 10
-        else:
-            idle = origin
-
-        for status in statuses:
-            queue.put(status)
-
-        time.sleep(idle)
-
-    queue.put(None)
+    return True, None
 
 
-def consume(queue):
-    while True:
-        status: Status = queue.get()
-        if status is None:
-            log.info('[consumer] Exiting')
-            break
+def process_status(status: Status):
+    if status is None:
+        return None
 
-        if not filter_by_status(status):
-            log.info('Filtered one by status info')
-            continue
+    passed, reason = filter_by_status(status)
+    if not passed:
+        log.info(f'Filtered {status.id!r} by status info out of {reason!r}')
+        return None
 
-        fanfou_url = status.photo.origin_url
-        image_content = download_photo(fanfou_url)
-        if DEBUG and image_content:
-            f = DEBUG_PHOTO_FOLDER / (now() + '_' + status.id + '.' + fanfou_url.rsplit('.')[-1])
-            f.write_bytes(image_content)
+    fanfou_url = status.photo.origin_url
+    image_content = download_photo(fanfou_url)
+    if not image_content:
+        log.error(f'Download photo failed: {fanfou_url!r}')
+        return None
 
-        image_url = upload_photo_to_microsoft(image_content)
-        if not image_url:
-            continue
+    if DEBUG:
+        f = DEBUG_PHOTO_FOLDER / (now() + '_' + status.id + '.' + fanfou_url.rsplit('.')[-1])
+        f.write_bytes(image_content)
 
-        data = computer_vision(status, face_url=image_url)
-        if not data or not filter_by_image(status, data):
-            log.info('Filtered one by image info')
-            continue
+    image_url = upload_photo_to_microsoft(image_content)
+    if not image_url:
+        log.error(f'Upload photo to micorsoft failed: {fanfou_url!r}')
+        return None
 
-        score = face_score(status, image_url)
-        if score is not None and score < MIN_SCORE:
-            log.info('Filtered one by face score')
-            continue
+    data = computer_vision(status, face_url=image_url)
+    if not data:
+        log.error('Computer vision api failed')
+        return None
 
-        try:
-            status.repost('', repost_style_left='转', repost_style_right='')
-            log.info('Forward one')
-        except Exception:
-            log.error('Report failed')
+    passed, reason = filter_by_image(status, data)
+    if not passed:
+        log.info(f'Filtered {status.id!r} by image info out of {reason!r}')
+        return None
 
-        time.sleep(1)
+    score = face_score(status, image_url)
+    if score is not None and score < MIN_SCORE:
+        log.info(f'Filtered {status.id!r} by face score: {score}')
+        return None
+
+    try:
+        status.repost('', repost_style_left='转', repost_style_right='')
+        log.info(f'Forward {status.id!r}')
+    except Exception:
+        log.error('Report failed')
 
 
 def main():
-    if DEBUG:
-        DEBUG_PHOTO_FOLDER.mkdir(parents=True, exist_ok=True)
-        DEBUG_STAT_FOLDER.mkdir(parents=True, exist_ok=True)
+    timeline = fan.public_timeline
+    idle = origin = 5
 
-    load_spam_bots()
-    q = Queue(maxsize=100)
-    producer = threading.Thread(target=produce, args=(q,), daemon=True)
-    consumer = threading.Thread(target=consume, args=(q,), daemon=True)
+    with ThreadPoolExecutor(max_workers=5,
+                            thread_name_prefix='woker') as executor:
+        while True:
+            try:
+                statuses = timeline.fetch_newer()
+            except FanfouError as e:
+                # Fanfou 有可能宕机了
+                log.exception('Fetch new statuses error')
+                time.sleep(3)
+                continue
 
-    producer.start()
-    consumer.start()
-    producer.join()
-    consumer.join()
+            log.info('Got %s new statuses', len(statuses))
+            if not statuses:
+                idle = min(idle * 1.5, 60)
+            elif len(statuses) <= 3:
+                idle = 10
+            else:
+                idle = origin
+
+            for status in statuses:
+                executor.submit(process_status, status)
+
+            time.sleep(idle)
 
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
         DEBUG = sys.argv[1].startswith('d')
+
+    if DEBUG:
+        DEBUG_PHOTO_FOLDER.mkdir(parents=True, exist_ok=True)
+        DEBUG_STAT_FOLDER.mkdir(parents=True, exist_ok=True)
 
     main()
