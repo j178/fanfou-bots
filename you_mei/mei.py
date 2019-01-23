@@ -248,8 +248,9 @@ def filter_by_status(status: Status):
         if birthday:
             year = datetime.now().year
             try:
-                if int(birthday[:4]) < year - MAX_AGE:
-                    return False, 'old profile age'
+                birth_year = int(birthday[:4])
+                if 1000 < birth_year < year - MAX_AGE:
+                    return False, f'profile age {birth_year}'
             except Exception:
                 pass
     return True, None
